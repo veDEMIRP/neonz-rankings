@@ -26,7 +26,8 @@ const IPFS_GATEWAYS = [
   'https://ipfs.infura.io/ipfs',
 ];
 const IPFS_RANDOM_GATEWAY = true;
-const IPFS_PARALLEL_REQUESTS = 4;
+const IPFS_PARALLEL_REQUESTS = false;
+const IPFS_PARALLEL_REQUEST_COUNT = 4;
 const DEBUG = true;
 
 // INITIALIZATIONS
@@ -224,42 +225,104 @@ function getRandomIPFSGateway() {
   return IPFS_GATEWAYS[random];
 }
 
+function addAttributesMetaAttribute(token) {
+  token.attributes.push({ name: 'Attributes', value: token.attributes.length });
+  return token;
+}
+
+function addMissingAttributes(token) {
+  for (const attr of attributeNames) {
+    if (!token[attr] && !token[attr] != 0) {
+      // console.log(`Token ID ${token.tokenId}: Adding missing attribute ${attr}`);
+      token.attributes[attr] = 'None';
+    }
+  }
+  return token;
+}
+
+async function getAllTokenMetadataFromIPFS() {
+  let ids = ipfsList.map(i => parseInt(i.tokenId));
+  ids = ids.sort((a, b) => a - b);
+
+  if (IPFS_PARALLEL_REQUESTS) {
+    eachLimit(ids, async function(id) {
+      const item = ipfsList.find(i => i.tokenId == id);
+      await loadCacheOrGetTokenMetadataFromIPFS(item);
+    }, IPFS_PARALLEL_REQUEST_COUNT);
+  } else {
+    for (const id of ids) {
+      const item = ipfsList.find(i => i.tokenId == id);
+      await loadCacheOrGetTokenMetadataFromIPFS(item);
+    }
+  }
+  console.log('##############');
+}
+
+async function collectAttributes() {
+  let ids = ipfsList.map(i => parseInt(i.tokenId));
+  ids = ids.sort((a, b) => a - b);
+
+  for (const id of ids) {
+    const item = ipfsList.find(i => i.tokenId == id);
+    let tokenMetadata = await loadCacheOrGetTokenMetadataFromIPFS(item);
+    tokenMetadata.tokenId = id;
+    tokenMetadata = addMissingAttributes(tokenMetadata);
+    tokenMetadata = addAttributesMetaAttribute(tokenMetadata);
+
+    const attributes = [];
+    for (const attr of tokenMetadata.attributes) {
+      if (attr.name != 'status' && attributeNames.indexOf(attr.name) < 0) {
+        attributeNames.push(attr.name);
+      }
+    }
+    attributeNames = attributeNames.sort();
+
+    fs.existsSync('neonz-attrs.json') && fs.unlinkSync('neonz-attrs.json');
+    cacheData(attributeNames, 'neonz-attrs.json');
+  }
+}
+
+async function generateTokenDetails() {
+  let ids = ipfsList.map(i => parseInt(i.tokenId));
+  ids = ids.sort((a, b) => a - b);
+
+  for (const id of ids) {
+    const item = ipfsList.find(i => i.tokenId == id);
+    let tokenMetadata = await loadCacheOrGetTokenMetadataFromIPFS(item);
+    tokenMetadata.tokenId = id;
+    tokenMetadata = addMissingAttributes(tokenMetadata);
+    tokenMetadata = addAttributesMetaAttribute(tokenMetadata);
+
+    const attributes = [];
+    for (const attr of tokenMetadata.attributes) {
+      if (attr.name != 'status') {
+        const attribute = {
+          name: attr.name,
+          value: attr.value
+        };
+        attributes.push(attribute);
+        incrementAttribute(attribute);
+      }
+    }
+    const detail = {
+      id: item.tokenId,
+      rank: 0,
+      score: 0,
+      name: tokenMetadata.name,
+      displayUri: tokenMetadata.displayUri,
+      attributes: attributes
+    };
+    tokens[`${item.tokenId}`] = detail;
+  }
+}
+
 // MAIN
 
 const ipfsList = await getNEONZIPFSList();
-const items = [];
-let ids = ipfsList.map(i => parseInt(i.tokenId));
-ids = ids.sort((a, b) => a - b);
 
-eachLimit(ids, async function(id) {
-  const item = ipfsList.find(i => i.tokenId == id);
-  const tokenMetadata = await loadCacheOrGetTokenMetadataFromIPFS(item);
-}, IPFS_PARALLEL_REQUESTS);
-
-for (const id of ids) {
-  const item = ipfsList.find(i => i.tokenId == id);
-  const tokenMetadata = await loadCacheOrGetTokenMetadataFromIPFS(item);
-  tokenMetadata.attributes.push({ name: 'Attributes', value: tokenMetadata.attributes.length })
-  // console.log(tokenMetadata);
-  const attributes = [];
-  for (const attr of tokenMetadata.attributes) {
-    const attribute = {
-      name: attr.name,
-      value: attr.value
-    };
-    attributes.push(attribute);
-    incrementAttribute(attribute);
-  }
-  const rankingDetail = {
-    id: item.tokenId,
-    rank: 0,
-    score: 0,
-    name: tokenMetadata.name,
-    displayUri: tokenMetadata.displayUri,
-    attributes: attributes
-  };
-  tokens[`${item.tokenId}`] = rankingDetail;
-}
+await getAllTokenMetadataFromIPFS();
+await collectAttributes();
+await generateTokenDetails();
 
 // CALCULATIONS
 calculateAttributeRarityScores();
