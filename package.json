@@ -1,0 +1,14 @@
+{
+  "name": "token_info",
+  "version": "1.0.0",
+  "main": "index.js",
+  "license": "MIT",
+  "type": "module",
+  "dependencies": {
+    "@taquito/utils": "^10.2.1",
+    "axios": "^0.23.0"
+  },
+  "scripts": {
+    "start": "node --trace-warnings index.js"
+  }
+}
